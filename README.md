@@ -61,12 +61,12 @@ docker compose exec api python -m app.cli balance client@company.com
 
 ## Deploy on Render + Neon (free, no card)
 
-Render runs the API from the `Dockerfile` (free web service, Singapore). Postgres is on Neon (free, permanent).
+Render runs the API from the `Dockerfile` (free web service `manka-client-api`, Singapore). Postgres is on Neon (free, permanent).
 
 1. **Neon** (neon.tech, sign in with GitHub): New project → region **AWS Asia Pacific (Singapore)** → copy the **pooled** connection string.
 2. **Brevo**: SMTP & API → API Keys → generate a key. Render's free tier blocks SMTP ports, so mail goes over Brevo's HTTPS API. `contact@mankacommerceandconsultancy.co.in` must be a verified sender.
-3. **Render** (render.com, sign in with GitHub): New → **Blueprint** → pick this repo. `render.yaml` sets everything; paste `DATABASE_URL` (Neon) and `BREVO_API_KEY` when asked. Check `https://mankaconsulting.onrender.com/health` → `{"ok":true}`.
-4. **Domain**: service → Settings → Custom Domains → add `api.mankacommerceandconsultancy.co.in`. In Domain India DNS, **add** `CNAME api → mankaconsulting.onrender.com`. Render issues HTTPS. After that, only `/health` answers on the onrender.com address (`ALLOWED_HOSTS`).
+3. **Render** (render.com, sign in with GitHub): New → **Blueprint** → pick this repo. `render.yaml` sets everything; paste `DATABASE_URL` (Neon) and `BREVO_API_KEY` when asked. Check `https://manka-client-api.onrender.com/health` → `{"ok":true}`.
+4. **Domain**: service → Settings → Custom Domains → add `api.mankacommerceandconsultancy.co.in`. In Domain India DNS, **add** `CNAME api → manka-client-api.onrender.com`. Render issues HTTPS. After that, only `/health` answers on the onrender.com address (`ALLOWED_HOSTS`).
 5. **Keep it awake**: free services sleep after 15 idle minutes (about 1 min to wake). A free cron-job.org job hitting `https://api.mankacommerceandconsultancy.co.in/health` every 10 minutes keeps it warm. 750 free hours a month covers 24x7.
 6. **Clients**: Render's free tier has no shell, so run the CLI from your laptop against Neon. Put `DATABASE_URL=<neon url>` in a local `.env` (git-ignored), then `.venv/Scripts/python -m app.cli add client@company.com "Company Name"`.
 

@@ -3,7 +3,7 @@
 # Values marked sync: false are asked for once in the dashboard and never stored in git.
 services:
   - type: web
-    name: mankaconsulting
+    name: manka-client-api
     runtime: docker
     plan: free
     region: singapore
