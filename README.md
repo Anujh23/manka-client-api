@@ -20,7 +20,18 @@ The site and the API sit on the same registrable domain, so the `session` cookie
 | GET | `/auth/me` | | 200 `{name, email}` · 401 |
 | POST | `/auth/forgot` | `{email}` | always 204; emails a 1-hour reset link if the account exists |
 | POST | `/auth/reset` | `{token, password}` | 204 (logs out every browser) · 400 expired · 422 password < 10 chars |
+| GET | `/account` | | 200 `{name, email, balance_paise, test_balance_paise, keys, entries}` (dashboard, session cookie) |
+| POST | `/account/keys` | `{mode: "test"\|"live"}` | 200 with the full `key`, **shown once** |
+| POST | `/account/keys/{id}/revoke` | | 204 |
+| GET | `/v1/ping` | `Authorization: Bearer <key>` | 200 `{ok, mode, client}` · 401 bad key |
 | GET | `/health` | | `{ok: true}` |
+
+### Wallet and pay-per-call
+
+- Money is integer **paise**. `wallet.py` is the only code that changes balances, and every change writes a ledger row.
+- Prices live in `products.py` (paise per successful call). **Live keys** pay from the wallet. **Test keys** pay the same price from a one-time **₹100 test credit** per client (`TEST_CREDIT_PAISE`), then get 402 "Test credit used up". A product route charges with `Depends(charged("<name>"))` from `api.py`.
+- A live call is debited before the product runs (atomic, so it can't overdraw); if balance is short you get **402**, and if the product fails it's **refunded**.
+- Recharge is manual for now: the client sends the amount from the dashboard (WhatsApp/email), pays, and you run `python -m app.cli credit client@company.com 1000 "UPI UTR 412345678901"`. A payment gateway can call `wallet.credit()` later.
 
 Security: Argon2id hashes, only SHA-256 of session/reset tokens is stored, lockout after 5 failures per email (or 30 per IP) in 15 min, and an Origin check plus CORS limited to the site.
 
@@ -44,6 +55,8 @@ docker compose exec api python -m app.cli add client@company.com "Company Name"
 docker compose exec api python -m app.cli password client@company.com
 docker compose exec api python -m app.cli disable client@company.com
 docker compose exec api python -m app.cli list
+docker compose exec api python -m app.cli credit client@company.com 1000 "UPI UTR 412345678901"
+docker compose exec api python -m app.cli balance client@company.com
 ```
 
 ## Deploy on Render + Neon (free, no card)
