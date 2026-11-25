@@ -17,13 +17,13 @@ The site and the API sit on the same registrable domain, so the `session` cookie
 |---|---|---|---|
 | POST | `/auth/login` | `{email, password}` | 200 `{name, email}` + session cookie · 401 wrong · 429 locked 15 min |
 | POST | `/auth/logout` | | 204 |
-| GET | `/auth/me` | | 200 `{name, email}` · 401 |
+| GET | `/auth/me` | | 200 `{name, email, is_admin}` · 401 |
 | POST | `/auth/forgot` | `{email}` | always 204; emails a 1-hour reset link if the account exists |
 | POST | `/auth/reset` | `{token, password}` | 204 (logs out every browser) · 400 expired · 422 password < 10 chars |
-| GET | `/account` | | 200 `{name, email, balance_paise, test_balance_paise, keys, entries}` (dashboard, session cookie) |
-| POST | `/account/keys` | `{mode: "test"\|"live"}` | 200 with the full `key`, **shown once** |
-| POST | `/account/keys/{id}/revoke` | | 204 |
-| GET | `/v1/ping` | `Authorization: Bearer <key>` | 200 `{ok, mode, client}` · 401 bad key |
+| GET | `/account` | | 200 `{name, email, balance_paise, prices, key, entries}` (dashboard, session cookie) |
+| POST | `/account/keys` | | 200 with the full `key`, **shown once**. One key per client: this revokes the previous one (Regenerate) |
+| POST | `/account/try/{product}` | product input | Same result and charge as `/v1`, from the dashboard |
+| GET | `/v1/ping` | `Authorization: Bearer <key>` | 200 `{id, ok, client}` · 401 bad key (not charged) |
 | GET | `/health` | | `{ok: true}` |
 
 ### Admin (/admin, admins only)
@@ -32,18 +32,33 @@ An admin is a normal client account marked with `python -m app.cli admin EMAIL`.
 
 | Method | Path | Body | Does |
 |---|---|---|---|
-| GET | `/admin/clients` | | All clients with balance, test credit and admin/disabled flags |
+| GET | `/admin/clients` | | All clients with balance and admin/disabled flags |
 | POST | `/admin/clients` | `{name, email, password}` | Create a client (password must be 10+ chars) |
 | POST | `/admin/clients/{id}` | `{name, email}` | Edit |
 | POST | `/admin/clients/{id}/password` | `{password}` | Set a password and log the client out everywhere |
 | POST | `/admin/clients/{id}/disable` / `enable` | | **"Delete" = disable**: login and API keys stop, history is kept, reversible. An admin can't disable themselves. |
 | POST | `/admin/clients/{id}/wallet` | `{action: credit\|debit, rupees, note}` | Recharge or adjustment, written to the ledger as "note (by admin@…)". Never goes below ₹0; max ₹10 lakh per entry. |
 
+### Product APIs (/v1, Bearer key)
+
+| Product | Route | Price |
+|---|---|---|
+| PAN check | `POST /v1/pan/check` `{pan}` | ₹0.50 |
+| GSTIN check | `POST /v1/gstin/check` `{gstin}` | ₹1 |
+| IFSC lookup | `GET /v1/ifsc/{ifsc}` | ₹0.50 |
+| Maps API | `POST /v1/maps/link` `{reference}` → one-time link (24 h); `GET /v1/maps/link/{request}` → `status`, `lat`, `lng`, `accuracy_m` (free) | ₹1 per link |
+
+- One file per product in `app/products/`. Add it to `PRODUCTS` in `app/products/__init__.py` and it gets a `/v1` route, a dashboard Try and a price. Client docs: website repo `src/data/api-content.ts` (page `/docs/`).
+- Success is the result plus `id` (`call_<n>`). Errors: `{"error": {"code", "message"}, "id"?}` with codes `invalid_key` 401, `insufficient_balance` 402, `not_found` 404, `invalid_request` 422, `server_error` 500.
+- **Only a 200 is charged.** Bad input (422) is checked before charging; not found (404) and failures (500) are refunded. A structurally invalid PAN/GSTIN is a 200 with `format_valid: false` (the check ran).
+- Maps API: the person opens the link on the website (`/locate/?t=…`, unbranded), taps Share location, and the phone's GPS fix is posted once to `POST /locate/{token}` (`app/locate.py`). Only the phone's GPS is used: no map or geocoding services to license. `GET /account/locations` lists requests for the dashboard.
+- PAN and GSTIN are format/check-digit checks only, never "verified". IFSC data is the open Razorpay IFSC dataset (MIT): download `IFSC.csv` from https://github.com/razorpay/ifsc/releases and run `python -m app.cli load-ifsc IFSC.csv v2.0.62 2026-09-01` (tag and date of that release), about monthly.
+
 ### Wallet and pay-per-call
 
 - Money is integer **paise**. `wallet.py` is the only code that changes balances, and every change writes a ledger row.
-- Prices live in `products.py` (paise per successful call). **Live keys** pay from the wallet. **Test keys** pay the same price from a one-time **₹100 test credit** per client (`TEST_CREDIT_PAISE`), then get 402 "Test credit used up". A product route charges with `Depends(charged("<name>"))` from `api.py`.
-- A live call is debited before the product runs (atomic, so it can't overdraw); if balance is short you get **402**, and if the product fails it's **refunded**.
+- Prices live on each product in `app/products/` (paise per successful call). Each client has **one API key** (`mcc_…`). Every call, by key or the dashboard's Try, is paid from the prepaid balance (starts at ₹0, nothing free); too little balance gets 402 `insufficient_balance`.
+- A call is debited before the product runs (atomic, so it can't overdraw); if balance is short you get **402**, and if the product fails it's **refunded**.
 - Recharge is manual for now: the client sends the amount from the dashboard (WhatsApp/email), pays, and you run `python -m app.cli credit client@company.com 1000 "UPI UTR 412345678901"`. A payment gateway can call `wallet.credit()` later.
 
 Security: Argon2id hashes, only SHA-256 of session/reset tokens is stored, lockout after 5 failures per email (or 30 per IP) in 15 min, and an Origin check plus CORS limited to the site.

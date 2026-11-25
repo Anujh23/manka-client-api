@@ -16,8 +16,7 @@ from sqlalchemy.orm import Session
 from . import wallet
 from .auth import CurrentClient
 from .db import DB, utcnow
-from .models import Admin, Client, LoginSession, TestWallet, Wallet
-from .products import TEST_CREDIT_PAISE
+from .models import Admin, Client, LoginSession, Wallet
 from .security import MIN_PASSWORD, hash_password
 
 router = APIRouter(prefix="/admin")
@@ -42,7 +41,6 @@ class ClientRow(BaseModel):
     is_active: bool
     is_admin: bool
     balance_paise: int
-    test_balance_paise: int
     created_at: str
 
 
@@ -91,11 +89,9 @@ def _rows(db: Session, only_id: int | None = None) -> list[ClientRow]:
             Client,
             Admin.client_id.is_not(None),
             func.coalesce(Wallet.balance_paise, 0),
-            func.coalesce(TestWallet.balance_paise, TEST_CREDIT_PAISE),
         )
         .outerjoin(Admin, Admin.client_id == Client.id)
         .outerjoin(Wallet, Wallet.client_id == Client.id)
-        .outerjoin(TestWallet, TestWallet.client_id == Client.id)
         .order_by(Client.id.desc())
     )
     if only_id is not None:
@@ -103,9 +99,9 @@ def _rows(db: Session, only_id: int | None = None) -> list[ClientRow]:
     return [
         ClientRow(
             id=c.id, name=c.name, email=c.email, is_active=c.is_active, is_admin=bool(is_admin),
-            balance_paise=bal, test_balance_paise=test, created_at=c.created_at.isoformat(timespec="seconds") + "Z",
+            balance_paise=bal, created_at=c.created_at.isoformat(timespec="seconds") + "Z",
         )
-        for c, is_admin, bal, test in db.execute(q)
+        for c, is_admin, bal in db.execute(q)
     ]
 
 

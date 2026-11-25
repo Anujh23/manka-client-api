@@ -1,13 +1,13 @@
-"""Wallet, API keys and pay-per-call: balance → keys → charged /v1 calls."""
+"""Wallet, the API key and pay-per-call: calls are paid from the prepaid balance, or get a 402."""
 import pytest
-from fastapi import Depends, HTTPException
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 from sqlalchemy import delete, select
 
 from app import api, products, wallet
 from app.db import SessionLocal
 from app.main import app
-from app.models import Admin, ApiCall, ApiKey, Client, LoginSession, TestWallet, Wallet, WalletEntry
+from app.models import Admin, ApiCall, ApiKey, Client, LoginSession, Wallet, WalletEntry
 from app.security import hash_password
 
 ORIGIN = {"Origin": "http://site.test"}
@@ -15,21 +15,24 @@ PW = "correct horse 1"
 
 
 # A priced product and a failing one, only for these tests.
-@app.get("/v1/_test/priced")
-def _priced(caller=Depends(api.charged("ping"))):
-    return {"ok": True}
+class _Empty(BaseModel):
+    pass
 
 
-@app.get("/v1/_test/broken")
-def _broken(caller=Depends(api.charged("ping"))):
-    raise HTTPException(400, "Bad input.")
+def _boom(db, body, client):
+    raise RuntimeError("boom")
+
+
+for _path, _price, _run in (("priced", 250, lambda db, body, client: {"ok": True}), ("broken", 250, _boom)):
+    _p = products.Product(name=f"_{_path}", title=_path, method="GET", path=f"/v1/_test/{_path}", price_paise=_price, input=_Empty, run=_run)
+    app.add_api_route(_p.path, api.endpoint(_p), methods=["GET"])
 
 
 @pytest.fixture
 def site():
     with TestClient(app, headers=ORIGIN) as c:
         with SessionLocal() as db:
-            for m in (ApiCall, ApiKey, WalletEntry, Wallet, TestWallet, LoginSession, Admin, Client):
+            for m in (ApiCall, ApiKey, WalletEntry, Wallet, LoginSession, Admin, Client):
                 db.execute(delete(m))
             db.add(Client(email="asha@example.com", name="Asha", password_hash=hash_password(PW)))
             db.commit()
@@ -53,9 +56,13 @@ def _call(path, key):
         return c.get(path, headers={"Authorization": f"Bearer {key}"})
 
 
+def _balance(site):
+    return site.get("/account").json()["balance_paise"]
+
+
 def test_account_shows_balance_and_ledger(site):
     acc = site.get("/account").json()
-    assert (acc["balance_paise"], acc["test_balance_paise"]) == (0, products.TEST_CREDIT_PAISE)
+    assert (acc["balance_paise"], acc["key"]) == (0, None)
     _recharge(100_000)
     acc = site.get("/account").json()
     assert acc["balance_paise"] == 100_000
@@ -65,69 +72,50 @@ def test_account_shows_balance_and_ledger(site):
 
 
 def test_key_shown_once_then_only_prefix(site):
-    new = site.post("/account/keys", json={"mode": "live"}).json()
-    assert new["key"].startswith("mcc_live_") and new["prefix"] == new["key"][:13]
-    listed = site.get("/account").json()["keys"]
-    assert listed == [{k: new[k] for k in ("id", "prefix", "mode", "created_at", "last_used_at")}]
-    assert "key" not in listed[0]
+    new = site.post("/account/keys").json()
+    assert new["key"].startswith("mcc_") and new["prefix"] == new["key"][:12]
+    shown = site.get("/account").json()["key"]
+    assert shown == {k: new[k] for k in ("id", "prefix", "created_at", "last_used_at")}
 
 
-def test_ping_with_test_and_live_keys(site):
-    test_key = site.post("/account/keys", json={"mode": "test"}).json()["key"]
-    r = _call("/v1/ping", test_key)
-    assert r.status_code == 200 and r.json() == {"ok": True, "mode": "test", "client": "Asha"}
-    assert _call("/v1/ping", "mcc_live_nope").status_code == 401
+def test_ping_is_free(site):
+    key = site.post("/account/keys").json()["key"]
+    r = _call("/v1/ping", key)
+    assert r.status_code == 200 and r.json() | {"id": None} == {"id": None, "ok": True, "client": "Asha"}
+    assert _call("/v1/ping", "mcc_nope").status_code == 401
     with TestClient(app) as c:
         assert c.get("/v1/ping").status_code == 401
 
 
-def test_live_calls_charge_and_stop_at_zero(site, monkeypatch):
-    monkeypatch.setitem(products.PRICES, "ping", 250)  # ₹2.50 per call
-    live = site.post("/account/keys", json={"mode": "live"}).json()["key"]
-    test = site.post("/account/keys", json={"mode": "test"}).json()["key"]
-
-    assert _call("/v1/_test/priced", live).status_code == 402  # empty wallet
+def test_calls_charge_the_balance_and_stop_at_zero(site):  # /v1/_test/priced costs ₹2.50
+    key = site.post("/account/keys").json()["key"]
+    r = _call("/v1/_test/priced", key)  # new account: ₹0, nothing free
+    assert r.status_code == 402 and r.json()["error"] == {"code": "insufficient_balance", "message": "Insufficient balance. Recharge to continue."}
     _recharge(500)
-    assert _call("/v1/_test/priced", live).status_code == 200
-    assert _call("/v1/_test/priced", live).status_code == 200
-    assert _call("/v1/_test/priced", live).status_code == 402  # ₹0 left
-    assert _call("/v1/_test/priced", test).status_code == 200  # test keys use the test credit, not the wallet
-    acc = site.get("/account").json()
-    assert (acc["balance_paise"], acc["test_balance_paise"]) == (0, products.TEST_CREDIT_PAISE - 250)
+    assert [_call("/v1/_test/priced", key).status_code for _ in range(3)] == [200, 200, 402]
+    assert _balance(site) == 0
+    assert [e["kind"] for e in site.get("/account").json()["entries"]] == ["usage", "usage", "recharge"]
 
 
-def test_test_credit_is_capped_at_100_rupees(site, monkeypatch):
-    monkeypatch.setitem(products.PRICES, "ping", 25_00)  # ₹25 per call → 4 test calls fit in ₹100
-    test = site.post("/account/keys", json={"mode": "test"}).json()["key"]
-    assert [_call("/v1/_test/priced", test).status_code for _ in range(4)] == [200] * 4
-    r = _call("/v1/_test/priced", test)
-    assert r.status_code == 402 and "Test credit used up" in r.json()["detail"]
-    acc = site.get("/account").json()
-    assert (acc["balance_paise"], acc["test_balance_paise"], acc["entries"]) == (0, 0, [])  # real wallet untouched
-
-
-def test_failed_call_is_refunded(site, monkeypatch):
-    monkeypatch.setitem(products.PRICES, "ping", 250)
-    live = site.post("/account/keys", json={"mode": "live"}).json()["key"]
+def test_failed_call_is_refunded(site):
+    key = site.post("/account/keys").json()["key"]
     _recharge(1_000)
-    assert _call("/v1/_test/broken", live).status_code == 400
+    r = _call("/v1/_test/broken", key)
+    assert r.status_code == 500 and r.json()["error"]["code"] == "server_error"
     acc = site.get("/account").json()
     assert acc["balance_paise"] == 1_000
     assert [e["kind"] for e in acc["entries"][:2]] == ["refund", "usage"]
 
-    test = site.post("/account/keys", json={"mode": "test"}).json()["key"]
-    assert _call("/v1/_test/broken", test).status_code == 400
-    assert site.get("/account").json()["test_balance_paise"] == products.TEST_CREDIT_PAISE  # test credit refunded too
 
-
-def test_revoked_key_stops_working(site):
-    new = site.post("/account/keys", json={"mode": "test"}).json()
-    assert site.post(f"/account/keys/{new['id']}/revoke").status_code == 204
-    assert _call("/v1/ping", new["key"]).status_code == 401
-    assert site.get("/account").json()["keys"] == []
+def test_one_key_regenerate_replaces_it(site):
+    old = site.post("/account/keys").json()
+    new = site.post("/account/keys").json()
+    assert _call("/v1/ping", old["key"]).status_code == 401
+    assert _call("/v1/ping", new["key"]).status_code == 200
+    assert site.get("/account").json()["key"]["id"] == new["id"]
 
 
 def test_dashboard_needs_login():
     with TestClient(app, headers=ORIGIN) as c:
         assert c.get("/account").status_code == 401
-        assert c.post("/account/keys", json={"mode": "test"}).status_code == 401
+        assert c.post("/account/keys").status_code == 401

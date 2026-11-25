@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, select
 from . import mailer
 from .config import get_settings
 from .db import DB, utcnow
-from .models import Client, LoginAttempt, LoginSession, PasswordReset
+from .models import Admin, Client, LoginAttempt, LoginSession, PasswordReset
 from .security import MIN_PASSWORD, hash_password, needs_rehash, new_token, token_hash, verify_password
 
 router = APIRouter(prefix="/auth")
@@ -39,6 +39,10 @@ class ResetIn(BaseModel):
 class ClientOut(BaseModel):
     name: str
     email: str
+
+
+class MeOut(ClientOut):
+    is_admin: bool  # shows the Admin item in the account menu
 
 
 def _email(raw: str) -> str:
@@ -103,8 +107,8 @@ def logout(response: Response, db: DB, session: Annotated[str | None, Cookie(ali
 
 
 @router.get("/me")
-def me(client: CurrentClient) -> ClientOut:
-    return ClientOut(name=client.name, email=client.email)
+def me(client: CurrentClient, db: DB) -> MeOut:
+    return MeOut(name=client.name, email=client.email, is_admin=db.get(Admin, client.id) is not None)
 
 
 @router.post("/forgot", status_code=204)

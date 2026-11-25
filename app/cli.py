@@ -8,10 +8,14 @@
     python -m app.cli credit EMAIL 1000 "UPI UTR 412345678901"   # add Rs. 1000 after the client pays
     python -m app.cli balance EMAIL
     python -m app.cli admin EMAIL                                # let this account use /admin
+    python -m app.cli load-ifsc IFSC.csv v2.0.62 2026-09-01       # IFSC data: CSV, release tag, release date
+
+IFSC data: download IFSC.csv from https://github.com/razorpay/ifsc/releases (MIT licence), about monthly.
 """
 import argparse
 import getpass
 import sys
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import delete, select
@@ -19,6 +23,7 @@ from sqlalchemy import delete, select
 from . import wallet
 from .db import Base, SessionLocal, engine
 from .models import Admin, Client, LoginSession
+from .products import ifsc
 from .security import MIN_PASSWORD, hash_password
 
 
@@ -44,10 +49,18 @@ def main() -> None:
     cr.add_argument("rupees")
     cr.add_argument("note", help='Payment reference, e.g. "UPI UTR 412345678901"')
     sub.add_parser("list")
+    li = sub.add_parser("load-ifsc")
+    li.add_argument("csv")
+    li.add_argument("version", help="Release tag, e.g. v2.0.62")
+    li.add_argument("as_of", type=date.fromisoformat, help="Release date, e.g. 2026-09-01")
     args = p.parse_args()
 
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
+        if args.cmd == "load-ifsc":
+            with open(args.csv, encoding="utf-8", newline="") as f:
+                print(f"Loaded {ifsc.load(db, f, args.version, args.as_of):,} branches.")
+            return
         if args.cmd == "list":
             for c in db.scalars(select(Client).order_by(Client.id)):
                 print(f"{c.id:>4}  {'active  ' if c.is_active else 'disabled'}  {c.email}  ({c.name})")

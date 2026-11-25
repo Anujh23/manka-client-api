@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -72,16 +72,6 @@ class Wallet(Base):
     balance_paise: Mapped[int] = mapped_column(default=0)
 
 
-class TestWallet(Base):
-    """Test credit, one row per client, created with products.TEST_CREDIT_PAISE. No ledger: ApiCall logs test usage."""
-
-    __tablename__ = "test_wallets"
-    __test__ = False  # the name starts with "Test"; tell pytest it isn't a test class
-
-    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True)
-    balance_paise: Mapped[int]
-
-
 class WalletEntry(Base):
     """Ledger: every credit (+) and debit (-), with the balance right after it."""
 
@@ -104,23 +94,71 @@ class ApiKey(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
     key_hash: Mapped[str] = mapped_column(String(64), unique=True)
-    prefix: Mapped[str] = mapped_column(String(20))  # e.g. "mcc_live_3fK9", safe to display
-    mode: Mapped[str] = mapped_column(String(4))  # test | live
+    prefix: Mapped[str] = mapped_column(String(20))  # e.g. "mcc_3fK9x2Lq", safe to display
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_used_at: Mapped[datetime | None] = mapped_column(default=None)
     revoked_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
 class ApiCall(Base):
-    """Usage log: one row per /v1 call, test and live."""
+    """Usage log: one row per product call, test and live. key_id is empty for calls made from the dashboard."""
 
     __tablename__ = "api_calls"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
-    key_id: Mapped[int] = mapped_column(ForeignKey("api_keys.id", ondelete="CASCADE"))
-    mode: Mapped[str] = mapped_column(String(4))
+    key_id: Mapped[int | None] = mapped_column(ForeignKey("api_keys.id", ondelete="CASCADE"))
     product: Mapped[str] = mapped_column(String(40))
     cost_paise: Mapped[int] = mapped_column(default=0)
     ok: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+
+
+class IfscBranch(Base):
+    """Bank branches for the IFSC lookup, loaded with `python -m app.cli load-ifsc` (open Razorpay IFSC dataset)."""
+
+    __tablename__ = "ifsc_branches"
+
+    ifsc: Mapped[str] = mapped_column(String(11), primary_key=True)
+    bank: Mapped[str | None] = mapped_column(String(100))
+    branch: Mapped[str] = mapped_column(String(120))
+    address: Mapped[str] = mapped_column(String(300))
+    city: Mapped[str] = mapped_column(String(60))
+    district: Mapped[str] = mapped_column(String(60))
+    state: Mapped[str] = mapped_column(String(60))
+    micr: Mapped[str | None] = mapped_column(String(9))
+    upi: Mapped[bool]
+    neft: Mapped[bool]
+    rtgs: Mapped[bool]
+    imps: Mapped[bool]
+
+
+class Dataset(Base):
+    """Which release of a loaded dataset is live, e.g. name="ifsc", version="v2.0.62", as_of=2026-09-01."""
+
+    __tablename__ = "datasets"
+
+    name: Mapped[str] = mapped_column(String(20), primary_key=True)
+    version: Mapped[str] = mapped_column(String(40))
+    as_of: Mapped[date]
+
+
+class LocationRequest(Base):
+    """Maps API: a one-time link a client sends to someone; opening it and allowing location stores their GPS fix.
+    `public_id` (loc_…) is what the client sees; `token` is the secret in the link (/locate/?t=…)."""
+
+    __tablename__ = "location_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(20), unique=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    reference: Mapped[str] = mapped_column(String(64))  # the client's own id, e.g. a loan number
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+    expires_at: Mapped[datetime]
+    lat: Mapped[float | None] = mapped_column(default=None)
+    lng: Mapped[float | None] = mapped_column(default=None)
+    accuracy_m: Mapped[float | None] = mapped_column(default=None)
+    located_at: Mapped[datetime | None] = mapped_column(default=None)  # server time the fix arrived
+    ip: Mapped[str | None] = mapped_column(String(45), default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(300), default=None)

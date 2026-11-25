@@ -5,7 +5,7 @@ from sqlalchemy import delete, select
 
 from app.db import SessionLocal
 from app.main import app
-from app.models import Admin, ApiCall, ApiKey, Client, LoginSession, TestWallet, Wallet, WalletEntry
+from app.models import Admin, ApiCall, ApiKey, Client, LoginSession, Wallet, WalletEntry
 from app.security import hash_password
 
 ORIGIN = {"Origin": "http://site.test"}
@@ -20,7 +20,7 @@ def _login(c, email, pw=PW):
 def admin():
     with TestClient(app, headers=ORIGIN) as c:
         with SessionLocal() as db:
-            for m in (ApiCall, ApiKey, WalletEntry, Wallet, TestWallet, LoginSession, Admin, Client):
+            for m in (ApiCall, ApiKey, WalletEntry, Wallet, LoginSession, Admin, Client):
                 db.execute(delete(m))
             boss = Client(email="boss@example.com", name="Boss", password_hash=hash_password(PW))
             db.add_all([boss, Client(email="asha@example.com", name="Asha", password_hash=hash_password(PW))])
@@ -51,7 +51,7 @@ def test_non_admin_is_refused():
 def test_list_and_account_flag(admin):
     rows = admin.get("/admin/clients").json()
     assert {(r["email"], r["is_admin"], r["balance_paise"]) for r in rows} == {("boss@example.com", True, 0), ("asha@example.com", False, 0)}
-    assert admin.get("/account").json()["is_admin"] is True
+    assert admin.get("/auth/me").json()["is_admin"] is True
 
 
 def test_create_edit_and_duplicate_email(admin):
@@ -82,7 +82,7 @@ def test_disable_blocks_login_and_api_keys_then_enable(admin):
     aid = _id("asha@example.com")
     with TestClient(app, headers=ORIGIN) as asha:
         _login(asha, "asha@example.com")
-        key = asha.post("/account/keys", json={"mode": "test"}).json()["key"]
+        key = asha.post("/account/keys").json()["key"]
         assert admin.post(f"/admin/clients/{aid}/disable").status_code == 204
         assert asha.get("/auth/me").status_code == 401
         assert _login(asha, "asha@example.com").status_code == 401

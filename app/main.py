@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import account, admin, api, auth, models  # noqa: F401  (models registers the tables)
+from . import account, admin, api, auth, locate, models  # noqa: F401  (models registers the tables)
 from .config import get_settings
 from .db import Base, engine
 
@@ -47,10 +49,22 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
+app.add_exception_handler(api.ApiError, lambda _, e: api.error_response(e))
+
+
+@app.exception_handler(RequestValidationError)
+async def bad_json(request: Request, e: RequestValidationError):
+    """Product calls get the /v1 error shape (e.g. a body that isn't JSON); everything else keeps FastAPI's."""
+    if request.url.path.startswith(("/v1/", "/account/try/")):
+        return api.error_response(api.ApiError(422, "invalid_request", "Send a JSON body."))
+    return await request_validation_exception_handler(request, e)
+
+
 app.include_router(auth.router)
 app.include_router(account.router)
 app.include_router(admin.router)
 app.include_router(api.router)
+app.include_router(locate.router)
 
 
 @app.get("/health")
