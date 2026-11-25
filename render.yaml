@@ -1,0 +1,25 @@
+# Render Blueprint: Dashboard → New → Blueprint → pick this repo. Free web service in Singapore.
+# Postgres lives on Neon (Render's free Postgres is deleted after 30 days).
+# Values marked sync: false are asked for once in the dashboard and never stored in git.
+services:
+  - type: web
+    name: mankaconsulting
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL          # Neon connection string (postgresql://...?sslmode=require)
+        sync: false
+      - key: BREVO_API_KEY         # Brevo → SMTP & API → API Keys
+        sync: false
+      - key: SITE_URL
+        value: https://mankacommerceandconsultancy.co.in
+      - key: ALLOWED_ORIGINS
+        value: https://mankacommerceandconsultancy.co.in,https://www.mankacommerceandconsultancy.co.in
+      - key: ALLOWED_HOSTS
+        value: api.mankacommerceandconsultancy.co.in
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: MAIL_FROM
+        value: contact@mankacommerceandconsultancy.co.in
