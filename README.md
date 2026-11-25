@@ -26,6 +26,19 @@ The site and the API sit on the same registrable domain, so the `session` cookie
 | GET | `/v1/ping` | `Authorization: Bearer <key>` | 200 `{ok, mode, client}` · 401 bad key |
 | GET | `/health` | | `{ok: true}` |
 
+### Admin (/admin, admins only)
+
+An admin is a normal client account marked with `python -m app.cli admin EMAIL`. Admins log in at `/clientlogin/`, and their dashboard shows an **Admin** link to `/admin/`.
+
+| Method | Path | Body | Does |
+|---|---|---|---|
+| GET | `/admin/clients` | | All clients with balance, test credit and admin/disabled flags |
+| POST | `/admin/clients` | `{name, email, password}` | Create a client (password must be 10+ chars) |
+| POST | `/admin/clients/{id}` | `{name, email}` | Edit |
+| POST | `/admin/clients/{id}/password` | `{password}` | Set a password and log the client out everywhere |
+| POST | `/admin/clients/{id}/disable` / `enable` | | **"Delete" = disable**: login and API keys stop, history is kept, reversible. An admin can't disable themselves. |
+| POST | `/admin/clients/{id}/wallet` | `{action: credit\|debit, rupees, note}` | Recharge or adjustment, written to the ledger as "note (by admin@…)". Never goes below ₹0; max ₹10 lakh per entry. |
+
 ### Wallet and pay-per-call
 
 - Money is integer **paise**. `wallet.py` is the only code that changes balances, and every change writes a ledger row.
@@ -57,6 +70,7 @@ docker compose exec api python -m app.cli disable client@company.com
 docker compose exec api python -m app.cli list
 docker compose exec api python -m app.cli credit client@company.com 1000 "UPI UTR 412345678901"
 docker compose exec api python -m app.cli balance client@company.com
+docker compose exec api python -m app.cli admin you@company.com          # allow /admin
 ```
 
 ## Deploy on Render + Neon (free, no card)

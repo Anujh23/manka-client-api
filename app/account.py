@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from . import wallet
 from .auth import CurrentClient
 from .db import DB, utcnow
-from .models import ApiKey, WalletEntry
+from .models import Admin, ApiKey, WalletEntry
 from .security import new_token, token_hash
 
 router = APIRouter(prefix="/account")
@@ -41,6 +41,7 @@ class EntryOut(BaseModel):
 class AccountOut(BaseModel):
     name: str
     email: str
+    is_admin: bool
     balance_paise: int
     test_balance_paise: int
     keys: list[KeyOut]
@@ -70,6 +71,7 @@ def account(client: CurrentClient, db: DB) -> AccountOut:
     out = AccountOut(
         name=client.name,
         email=client.email,
+        is_admin=db.get(Admin, client.id) is not None,
         balance_paise=wallet.balance(db, client.id),
         test_balance_paise=wallet.balance(db, client.id, "test"),
         keys=[KeyOut(**_key_out(k)) for k in keys],

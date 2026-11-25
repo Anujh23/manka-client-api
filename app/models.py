@@ -38,6 +38,15 @@ class PasswordReset(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class Admin(Base):
+    """Client accounts allowed to use /admin. Grant with `python -m app.cli admin EMAIL`."""
+
+    __tablename__ = "admins"
+
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class LoginAttempt(Base):
     """Feeds the brute-force limit in auth.py."""
 

@@ -7,7 +7,7 @@ from sqlalchemy import delete, select
 from app import api, products, wallet
 from app.db import SessionLocal
 from app.main import app
-from app.models import ApiCall, ApiKey, Client, LoginSession, TestWallet, Wallet, WalletEntry
+from app.models import Admin, ApiCall, ApiKey, Client, LoginSession, TestWallet, Wallet, WalletEntry
 from app.security import hash_password
 
 ORIGIN = {"Origin": "http://site.test"}
@@ -29,7 +29,7 @@ def _broken(caller=Depends(api.charged("ping"))):
 def site():
     with TestClient(app, headers=ORIGIN) as c:
         with SessionLocal() as db:
-            for m in (ApiCall, ApiKey, WalletEntry, Wallet, TestWallet, LoginSession, Client):
+            for m in (ApiCall, ApiKey, WalletEntry, Wallet, TestWallet, LoginSession, Admin, Client):
                 db.execute(delete(m))
             db.add(Client(email="asha@example.com", name="Asha", password_hash=hash_password(PW)))
             db.commit()

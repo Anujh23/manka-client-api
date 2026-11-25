@@ -7,7 +7,7 @@ from sqlalchemy import delete
 from app import mailer
 from app.db import SessionLocal
 from app.main import app
-from app.models import Client, LoginAttempt, LoginSession, PasswordReset
+from app.models import Admin, Client, LoginAttempt, LoginSession, PasswordReset
 from app.security import hash_password
 
 ORIGIN = {"Origin": "http://site.test"}
@@ -18,7 +18,7 @@ PW = "correct horse 1"
 def api():
     with TestClient(app, headers=ORIGIN) as c:
         with SessionLocal() as db:
-            for m in (LoginAttempt, LoginSession, PasswordReset, Client):
+            for m in (LoginAttempt, LoginSession, PasswordReset, Admin, Client):
                 db.execute(delete(m))
             db.add(Client(email="asha@example.com", name="Asha", password_hash=hash_password(PW)))
             db.commit()
