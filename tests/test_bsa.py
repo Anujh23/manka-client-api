@@ -177,3 +177,24 @@ def test_load_limit_queue_and_busy(site, monkeypatch):
     second.join()
     assert results["first"].status_code == 200 and results["second"].status_code == 200
     assert balance(site) == before - 2_500
+
+
+def test_api_excel_format(site):
+    """format=xlsx on /v1/bsa/analyze returns the BSA Excel workbook (charged like JSON); a bad format is refused free."""
+    import io
+
+    from openpyxl import load_workbook
+
+    recharge(2_500)
+    before = balance(site)
+    with TestClient(app) as c:
+        auth = {"Authorization": f"Bearer {site.key}"}
+        bad = c.post("/v1/bsa/analyze", headers=auth, files={"file": ("s.pdf", statement_pdf(), "application/pdf")}, data={"format": "pdf"})
+        assert bad.status_code == 422 and bad.json()["error"]["code"] == "invalid_request"
+        assert balance(site) == before
+        r = c.post("/v1/bsa/analyze", headers=auth, files={"file": ("s.pdf", statement_pdf(), "application/pdf")}, data={"format": "xlsx"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/vnd.openxmlformats")
+    assert r.headers["content-disposition"].startswith('attachment; filename="bsa-report-call_')
+    sheets = load_workbook(io.BytesIO(r.content)).sheetnames
+    assert sheets[0] == "Summary" and "UPI Mobiles" in sheets and "Transactions" in sheets
+    assert balance(site) == before - 2_500

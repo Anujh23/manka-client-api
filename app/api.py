@@ -5,6 +5,7 @@ product finds nothing (404) or fails (500). Charging before running means two ca
 Errors have one shape: {"error": {"code", "message"}, "id"?}. The dashboard's Try uses execute() too (account.py).
 """
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -16,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import staticmap, wallet
+from .bsa.export import report_to_xlsx
 from .db import DB, utcnow
 from .models import ApiCall, ApiKey, Client, LocationRequest, Website
 from .products import PRODUCTS, NotFound, Product, Rejected, bsa, maps
@@ -143,9 +145,22 @@ def run_bsa(db: Session, file: UploadFile | None, password: str | None, caller: 
                        retry_after=30) from None
 
 
+def xlsx_response(report: dict) -> Response:
+    """A BSA report as the BSA Excel workbook (app/bsa/export.py), as a download named after the call."""
+    name = re.sub(r"[^A-Za-z0-9_-]", "", str(report.get("id") or "report"))[:40] or "report"
+    return Response(report_to_xlsx(report), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="bsa-report-{name}.xlsx"'})
+
+
 @router.post(bsa.PRODUCT.path, name="bsa")
-def bsa_analyze(caller: KeyCaller, db: DB, file: Annotated[UploadFile | None, File()] = None, password: Annotated[str | None, Form()] = None):
-    return run_bsa(db, file, password, caller)
+def bsa_analyze(caller: KeyCaller, db: DB, file: Annotated[UploadFile | None, File()] = None,
+                password: Annotated[str | None, Form()] = None, fmt: Annotated[str | None, Form(alias="format")] = None):
+    """`format` = json (default) or xlsx (the same report as the Excel workbook). Checked before anything is charged."""
+    fmt = (fmt or "json").strip().lower()
+    if fmt not in ("json", "xlsx"):
+        raise ApiError(422, "invalid_request", "format: use json or xlsx.")
+    report = run_bsa(db, file, password, caller)
+    return xlsx_response(report) if fmt == "xlsx" else report
 
 
 for _p in PRODUCTS:

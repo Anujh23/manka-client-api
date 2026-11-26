@@ -12,7 +12,6 @@ from sqlalchemy import delete, select, update
 
 from . import api, wallet
 from .auth import CurrentClient
-from .bsa.export import report_to_xlsx
 from .db import DB, utcnow
 from .models import ApiKey, LocationRequest, WalletEntry, Website
 from .products import BY_NAME, PRICES, bsa, maps
@@ -106,12 +105,9 @@ def bsa_excel(client: CurrentClient, report: Annotated[dict, Body()]) -> Respons
     if not isinstance(report.get("meta"), dict):
         raise api.ApiError(422, "invalid_request", "Send a BSA report.")
     try:
-        data = report_to_xlsx(report)
+        return api.xlsx_response(report)
     except Exception:
         raise api.ApiError(422, "invalid_request", "Could not build the Excel file from this report.") from None
-    name = re.sub(r"[^A-Za-z0-9_-]", "", str(report.get("id") or "report"))[:40] or "report"
-    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": f'attachment; filename="bsa-report-{name}.xlsx"'})
 
 
 @router.post("/try/{name}")
