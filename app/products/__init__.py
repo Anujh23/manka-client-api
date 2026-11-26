@@ -16,6 +16,15 @@ class NotFound(Exception):
     """Raise from a product's run() when there's nothing to return: the caller gets a 404 and is refunded."""
 
 
+class Rejected(Exception):
+    """Raise from a product's run() to refuse the input after charging: the caller gets `status`/`code`/`message`
+    and is refunded."""
+
+    def __init__(self, status: int, code: str, message: str):
+        super().__init__(message)
+        self.status, self.code, self.message = status, code, message
+
+
 @dataclass(frozen=True)
 class Product:
     name: str  # price key, ApiCall.product, and /account/try/{name}
@@ -27,8 +36,8 @@ class Product:
     run: Callable[[Session, Any, Any], dict]  # (db, validated input, calling Client)
 
 
-from . import gstin, ifsc, maps, pan  # noqa: E402  (they import Product from here)
+from . import bsa, gstin, ifsc, maps, pan  # noqa: E402  (they import Product from here)
 
-PRODUCTS: list[Product] = [pan.PRODUCT, gstin.PRODUCT, ifsc.PRODUCT, maps.PRODUCT, maps.LOCATE]
+PRODUCTS: list[Product] = [pan.PRODUCT, gstin.PRODUCT, ifsc.PRODUCT, maps.PRODUCT, maps.LOCATE, bsa.PRODUCT]
 BY_NAME = {p.name: p for p in PRODUCTS}
 PRICES = {p.name: p.price_paise for p in PRODUCTS}

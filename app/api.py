@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, Header, Request
+from fastapi import APIRouter, Body, Depends, File, Form, Header, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -18,9 +18,10 @@ from sqlalchemy.orm import Session
 from . import staticmap, wallet
 from .db import DB, utcnow
 from .models import ApiCall, ApiKey, Client, LocationRequest, Website
-from .products import PRODUCTS, NotFound, Product, maps
+from .products import PRODUCTS, NotFound, Product, Rejected, bsa, maps
 from .security import token_hash
 
+MAX_UPLOAD = bsa.MAX_PDF_BYTES
 router = APIRouter(prefix="/v1")
 log = logging.getLogger(__name__)
 
@@ -105,6 +106,8 @@ def execute(db: Session, product: Product, raw: Any, caller: Caller) -> dict:
         db.commit()
         if isinstance(e, NotFound):
             raise ApiError(404, "not_found", str(e), call.id) from None
+        if isinstance(e, Rejected):
+            raise ApiError(e.status, e.code, e.message, call.id) from None
         log.exception("product %s failed", product.name)
         raise ApiError(500, "server_error", "Something went wrong. You weren't charged.", call.id) from None
 
@@ -120,7 +123,21 @@ def endpoint(product: Product):
     return route
 
 
+def statement_input(file: UploadFile | None, password: str | None) -> dict:
+    """BSA takes a multipart upload (field `file`, optional `password`), so it has its own routes (here and in account.py)."""
+    if file is None:
+        raise ApiError(422, "invalid_request", "file: Upload a PDF.")
+    return {"pdf": file.file.read(MAX_UPLOAD + 1), "password": password, "filename": file.filename}
+
+
+@router.post(bsa.PRODUCT.path, name="bsa")
+def bsa_analyze(caller: KeyCaller, db: DB, file: Annotated[UploadFile | None, File()] = None, password: Annotated[str | None, Form()] = None):
+    return execute(db, bsa.PRODUCT, statement_input(file, password), caller)
+
+
 for _p in PRODUCTS:
+    if _p is bsa.PRODUCT:
+        continue  # multipart route above
     router.add_api_route(_p.path, endpoint(_p), methods=[_p.method], name=_p.name)
 
 

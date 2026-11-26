@@ -6,15 +6,16 @@ import re
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select, update
 
 from . import api, wallet
 from .auth import CurrentClient
+from .bsa.export import report_to_xlsx
 from .db import DB, utcnow
 from .models import ApiKey, LocationRequest, WalletEntry, Website
-from .products import BY_NAME, PRICES, maps
+from .products import BY_NAME, PRICES, bsa, maps
 from .security import new_token, token_hash
 
 router = APIRouter(prefix="/account")
@@ -90,6 +91,27 @@ def create_key(client: CurrentClient, db: DB) -> NewKeyOut:
     db.add(row)
     db.commit()
     return NewKeyOut(key=key, **_key_out(row))
+
+
+@router.post("/try/bsa")
+def try_bsa(client: CurrentClient, db: DB, file: Annotated[UploadFile | None, File()] = None, password: Annotated[str | None, Form()] = None) -> dict:
+    """Bank statement analysis from the dashboard (multipart, like /v1/bsa/analyze)."""
+    return api.execute(db, bsa.PRODUCT, api.statement_input(file, password), api.Caller(client=client, key=None))
+
+
+@router.post("/bsa/excel")
+def bsa_excel(client: CurrentClient, report: Annotated[dict, Body()]) -> Response:
+    """The BSA report the dashboard already has, as the same Excel workbook BSA exports. Free: nothing is stored, the
+    report is sent back by the page and turned into the file."""
+    if not isinstance(report.get("meta"), dict):
+        raise api.ApiError(422, "invalid_request", "Send a BSA report.")
+    try:
+        data = report_to_xlsx(report)
+    except Exception:
+        raise api.ApiError(422, "invalid_request", "Could not build the Excel file from this report.") from None
+    name = re.sub(r"[^A-Za-z0-9_-]", "", str(report.get("id") or "report"))[:40] or "report"
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="bsa-report-{name}.xlsx"'})
 
 
 @router.post("/try/{name}")
