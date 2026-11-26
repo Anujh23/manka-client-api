@@ -6,17 +6,18 @@ Errors have one shape: {"error": {"code", "message"}, "id"?}. The dashboard's Tr
 """
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import wallet
+from . import staticmap, wallet
 from .db import DB, utcnow
-from .models import ApiCall, ApiKey, Client, LocationRequest
+from .models import ApiCall, ApiKey, Client, LocationRequest, Website
 from .products import PRODUCTS, NotFound, Product, maps
 from .security import token_hash
 
@@ -52,7 +53,7 @@ class Caller:
     key: ApiKey | None  # None for the dashboard's Try
 
 
-def key_caller(db: DB, authorization: Annotated[str | None, Header()] = None) -> Caller:
+def key_caller(request: Request, db: DB, authorization: Annotated[str | None, Header()] = None) -> Caller:
     scheme, _, raw = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or not raw.strip():
         raise ApiError(401, "invalid_key", "Missing API key. Send 'Authorization: Bearer <key>'.")
@@ -60,6 +61,11 @@ def key_caller(db: DB, authorization: Annotated[str | None, Header()] = None) ->
     client = db.get(Client, key.client_id) if key else None
     if not key or not client or not client.is_active:
         raise ApiError(401, "invalid_key", "Invalid API key.")
+    # A browser call (it carries Origin) only works from the client's listed websites, like a restricted
+    # browser key: a key copied out of someone's web page can't be spent from another site.
+    origin = request.headers.get("origin")
+    if origin is not None and db.get(Website, (client.id, origin.rstrip("/").lower())) is None:
+        raise ApiError(403, "origin_not_allowed", f"{origin} can't use this key. Add it under API key → Websites in the dashboard.")
     return Caller(client=client, key=key)
 
 
@@ -132,3 +138,25 @@ def maps_result(request_id: str, caller: KeyCaller, db: DB) -> dict:
     if r is None:
         raise ApiError(404, "not_found", "Request not found.")
     return maps.view(r)
+
+
+@router.get("/maps/image/{request_id}.png")
+def maps_image(request_id: str, db: DB, credit: bool = False) -> Response:
+    """Map image of a located request: OpenStreetMap, pin, accuracy circle. Free (the location was charged). No key,
+    so it can go straight into an <img>: the request id is unguessable and only its client gets it.
+    No map credit on it by default: the client shows "© OpenStreetMap" next to the map (docs). ?credit=1 puts a small
+    label on the image instead."""
+    r = db.scalar(select(LocationRequest).where(LocationRequest.public_id == request_id))
+    if r is None or r.located_at is None:
+        raise ApiError(404, "not_found", "Image not found.")
+    lat, lng, accuracy_m = r.lat, r.lng, r.accuracy_m
+    db.rollback()  # hand the database connection back while the image renders
+    png, complete = staticmap.image(lat, lng, accuracy_m, credit)
+    cache = "public, max-age=31536000, immutable" if complete else "no-store"  # a tile failed: let the next load retry
+    return Response(png, media_type="image/png", headers={"Cache-Control": cache})
+
+
+@router.get("/maps.js", include_in_schema=False)
+def maps_js() -> FileResponse:
+    """The Maps JavaScript API for clients' web pages: <script src=".../v1/maps.js?key=KEY">."""
+    return FileResponse(Path(__file__).parent / "static" / "maps.js", media_type="application/javascript", headers={"Cache-Control": "public, max-age=300"})

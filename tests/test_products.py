@@ -175,7 +175,7 @@ def test_try_charges_the_balance_like_v1(site):
 
 def test_try_rules(site):
     assert site.post("/account/try/nope", json={}).status_code == 404
-    assert site.get("/account").json()["prices"] == {"pan": 50, "gstin": 100, "ifsc": 50, "maps": 100}
+    assert site.get("/account").json()["prices"] == {"pan": 50, "gstin": 100, "ifsc": 50, "maps": 500, "maps_locate": 500}
     with TestClient(app, headers={"Origin": "http://evil.test"}) as c:
         c.cookies = site.cookies
         assert c.post("/account/try/pan", json={"pan": "ABCPE1234F"}).status_code == 403

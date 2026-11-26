@@ -29,6 +29,6 @@ class Product:
 
 from . import gstin, ifsc, maps, pan  # noqa: E402  (they import Product from here)
 
-PRODUCTS: list[Product] = [pan.PRODUCT, gstin.PRODUCT, ifsc.PRODUCT, maps.PRODUCT]
+PRODUCTS: list[Product] = [pan.PRODUCT, gstin.PRODUCT, ifsc.PRODUCT, maps.PRODUCT, maps.LOCATE]
 BY_NAME = {p.name: p for p in PRODUCTS}
 PRICES = {p.name: p.price_paise for p in PRODUCTS}

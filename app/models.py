@@ -162,3 +162,12 @@ class LocationRequest(Base):
     located_at: Mapped[datetime | None] = mapped_column(default=None)  # server time the fix arrived
     ip: Mapped[str | None] = mapped_column(String(45), default=None)
     user_agent: Mapped[str | None] = mapped_column(String(300), default=None)
+
+
+class Website(Base):
+    """A website (origin, e.g. https://acme.in) allowed to call /v1 with the client's key from a browser."""
+
+    __tablename__ = "websites"
+
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True)
+    origin: Mapped[str] = mapped_column(String(200), primary_key=True)

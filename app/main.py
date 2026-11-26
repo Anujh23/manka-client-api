@@ -24,7 +24,7 @@ app = FastAPI(title="Client API", lifespan=lifespan, docs_url=None, redoc_url=No
 @app.middleware("http")
 async def check_origin(request: Request, call_next):
     """CSRF guard: a write that carries the session cookie must come from the website."""
-    if request.method not in ("GET", "HEAD", "OPTIONS"):
+    if request.method not in ("GET", "HEAD", "OPTIONS") and not request.url.path.startswith("/v1/"):
         origin = request.headers.get("origin")
         if (origin and origin.rstrip("/") not in settings.origins) or (not origin and auth.COOKIE in request.cookies):
             return JSONResponse({"detail": "Origin not allowed."}, status_code=403)
@@ -49,6 +49,36 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
+class OpenV1Cors:
+    """/v1 is called from clients' own websites (Maps JavaScript API) with a key, never with cookies, so any
+    origin may call it: answer preflights here and add a wildcard CORS header. Which sites may actually spend a
+    key is checked per key (api.key_caller, Websites). Added after CORSMiddleware so it runs first."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope["path"].startswith("/v1/"):
+            return await self.app(scope, receive, send)
+        if scope["method"] == "OPTIONS":
+            await send({"type": "http.response.start", "status": 204, "headers": [
+                (b"access-control-allow-origin", b"*"),
+                (b"access-control-allow-methods", b"GET, POST"),
+                (b"access-control-allow-headers", b"Authorization, Content-Type"),
+                (b"access-control-max-age", b"600"),
+            ]})
+            return await send({"type": "http.response.body", "body": b""})
+
+        async def send_with_cors(message):
+            if message["type"] == "http.response.start":
+                headers = [(k, v) for k, v in message.get("headers", []) if k.lower() != b"access-control-allow-origin"]
+                message = {**message, "headers": headers + [(b"access-control-allow-origin", b"*")]}
+            await send(message)
+
+        await self.app(scope, receive, send_with_cors)
+
+
+app.add_middleware(OpenV1Cors)
 app.add_exception_handler(api.ApiError, lambda _, e: api.error_response(e))
 
 

@@ -2,17 +2,18 @@
 
 One API key per client: generating a new one revokes the old one.
 """
+import re
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body
-from pydantic import BaseModel
-from sqlalchemy import select, update
+from fastapi import APIRouter, Body, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, select, update
 
 from . import api, wallet
 from .auth import CurrentClient
 from .db import DB, utcnow
-from .models import ApiKey, LocationRequest, WalletEntry
+from .models import ApiKey, LocationRequest, WalletEntry, Website
 from .products import BY_NAME, PRICES, maps
 from .security import new_token, token_hash
 
@@ -46,6 +47,7 @@ class AccountOut(BaseModel):
     balance_paise: int
     prices: dict[str, int]  # paise per call, by product name
     key: KeyOut | None
+    websites: list[str]  # origins allowed to use the key from a browser
     entries: list[EntryOut]
 
 
@@ -69,6 +71,7 @@ def account(client: CurrentClient, db: DB) -> AccountOut:
         balance_paise=wallet.balance(db, client.id),
         prices=PRICES,
         key=KeyOut(**_key_out(key)) if key else None,
+        websites=list(db.scalars(select(Website.origin).where(Website.client_id == client.id).order_by(Website.origin))),
         entries=[
             EntryOut(amount_paise=e.amount_paise, balance_after_paise=e.balance_after_paise, kind=e.kind, note=e.note, created_at=_ts(e.created_at))
             for e in entries
@@ -105,3 +108,29 @@ def locations(client: CurrentClient, db: DB) -> list[dict]:
         select(LocationRequest).where(LocationRequest.client_id == client.id).order_by(LocationRequest.id.desc()).limit(RECENT)
     )
     return [maps.view(r) for r in rows]
+
+
+ORIGIN = re.compile(r"^https?://[a-z0-9.-]+(:[0-9]{1,5})?$")
+MAX_WEBSITES = 10
+
+
+class WebsitesIn(BaseModel):
+    websites: list[str] = Field(max_length=MAX_WEBSITES)
+
+
+@router.post("/websites")
+def set_websites(body: WebsitesIn, client: CurrentClient, db: DB) -> list[str]:
+    """Replace the websites allowed to use the key from a browser (Maps JavaScript API)."""
+    clean = []
+    for raw in body.websites:
+        w = raw.strip().rstrip("/").lower()
+        if not w:
+            continue
+        if not ORIGIN.match(w):
+            raise HTTPException(400, f"{raw.strip()} isn't a website address like https://yourcompany.com")
+        if w not in clean:
+            clean.append(w)
+    db.execute(delete(Website).where(Website.client_id == client.id))
+    db.add_all(Website(client_id=client.id, origin=w) for w in clean)
+    db.commit()
+    return sorted(clean)

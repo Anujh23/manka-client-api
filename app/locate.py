@@ -4,20 +4,14 @@ GET  /locate/{token}  → who is asking and the link's status, for the page to s
 POST /locate/{token}  → the phone's GPS fix, accepted once while the link is pending.
 """
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
+from . import staticmap
 from .db import DB, utcnow
 from .models import Client, LocationRequest
-from .products.maps import status
+from .products.maps import FixIn, status
 
 router = APIRouter(prefix="/locate")
-
-
-class FixIn(BaseModel):
-    lat: float = Field(ge=-90, le=90)
-    lng: float = Field(ge=-180, le=180)
-    accuracy_m: float = Field(gt=0, le=100_000)
 
 
 def _request(db: DB, token: str) -> LocationRequest:
@@ -54,3 +48,4 @@ def submit(token: str, body: FixIn, request: Request, db: DB) -> None:
     db.commit()
     if not saved:
         raise HTTPException(409, "Location already shared.")
+    staticmap.warm(round(body.lat, 7), round(body.lng, 7), round(body.accuracy_m, 1))  # ready when the client reads it

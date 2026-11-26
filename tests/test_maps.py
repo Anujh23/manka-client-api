@@ -53,7 +53,7 @@ def test_link_flow_end_to_end(site):
     link = r.json()
     assert link["request"].startswith("loc_") and link["reference"] == "LN-1042" and link["status"] == "pending"
     assert link["url"].startswith("http://site.test/locate/?t=") and link["lat"] is None
-    assert site.get("/account").json()["balance_paise"] == 900  # ₹1 per link
+    assert site.get("/account").json()["balance_paise"] == 500  # ₹5 per link
 
     with visitor() as v:
         assert v.get(f"/locate/{token_of(link)}").json() == {"status": "pending", "requester": "Asha Finance"}
@@ -64,7 +64,7 @@ def test_link_flow_end_to_end(site):
     done = v1("GET", f"/maps/link/{link['request']}", site.key).json()
     assert (done["status"], done["lat"], done["lng"], done["accuracy_m"], done["url"]) == ("done", 28.6139391, 77.2090212, 12.3, None)
     assert done["located_at"].endswith("Z")
-    assert site.get("/account").json()["balance_paise"] == 900  # reading the result is free
+    assert site.get("/account").json()["balance_paise"] == 500  # reading the result is free
     assert [x["request"] for x in site.get("/account/locations").json()] == [link["request"]]
 
 
@@ -98,4 +98,4 @@ def test_reference_required_and_results_are_private(site):
 def test_try_from_dashboard(site):
     r = site.post("/account/try/maps", json={"reference": "LN-3"})
     assert r.status_code == 200 and r.json()["status"] == "pending"
-    assert site.get("/account").json()["balance_paise"] == 900
+    assert site.get("/account").json()["balance_paise"] == 500

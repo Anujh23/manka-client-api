@@ -46,12 +46,16 @@ An admin is a normal client account marked with `python -m app.cli admin EMAIL`.
 | PAN check | `POST /v1/pan/check` `{pan}` | ₹0.50 |
 | GSTIN check | `POST /v1/gstin/check` `{gstin}` | ₹1 |
 | IFSC lookup | `GET /v1/ifsc/{ifsc}` | ₹0.50 |
-| Maps API | `POST /v1/maps/link` `{reference}` → one-time link (24 h); `GET /v1/maps/link/{request}` → `status`, `lat`, `lng`, `accuracy_m` (free) | ₹1 per link |
+| Maps API | `POST /v1/maps/link` `{reference}` → one-time link (24 h); `GET /v1/maps/link/{request}` → `status`, `lat`, `lng`, `accuracy_m`, `image` (free) | ₹5 per link |
+| Maps JavaScript | `<script src="/v1/maps.js?key=KEY">` then `MapsAPI.locate()` (`POST /v1/maps/locate {lat, lng, accuracy_m}`) → coordinates + `image` | ₹5 per locate |
+| Map image | `GET /v1/maps/image/{request}.png`: PNG map (640×400, pin, accuracy circle) of any located request; no key, for `<img>`. No map credit on it by default: the client must show "© OpenStreetMap" next to the map. `?credit=1` adds a small label instead | Included |
 
 - One file per product in `app/products/`. Add it to `PRODUCTS` in `app/products/__init__.py` and it gets a `/v1` route, a dashboard Try and a price. Client docs: website repo `src/data/api-content.ts` (page `/docs/`).
 - Success is the result plus `id` (`call_<n>`). Errors: `{"error": {"code", "message"}, "id"?}` with codes `invalid_key` 401, `insufficient_balance` 402, `not_found` 404, `invalid_request` 422, `server_error` 500.
 - **Only a 200 is charged.** Bad input (422) is checked before charging; not found (404) and failures (500) are refunded. A structurally invalid PAN/GSTIN is a 200 with `format_valid: false` (the check ran).
-- Maps API: the person opens the link on the website (`/locate/?t=…`, unbranded), taps Share location, and the phone's GPS fix is posted once to `POST /locate/{token}` (`app/locate.py`). Only the phone's GPS is used: no map or geocoding services to license. `GET /account/locations` lists requests for the dashboard.
+- Maps API: the person opens the link on the website (`/locate/?t=…`, unbranded), taps Share location, and the phone's GPS fix is posted once to `POST /locate/{token}` (`app/locate.py`). The location comes from the phone's GPS. `GET /account/locations` lists requests for the dashboard.
+- Map images (`app/staticmap.py`): built on the server from OpenStreetMap tiles (OSM France) with Pillow. Rendering starts in the background the moment a location is saved, tiles are fetched in parallel, and tiles plus the last 64 images stay in memory: about 2 s for a new area, about 0.3 s nearby or repeated. Volunteer servers: if volume grows, move to a paid tile host.
+- Maps JavaScript (`app/static/maps.js`): GPS in the visitor's browser, Nominatim address. /v1 allows any origin (CORS `*`, no cookies), but a browser call (it carries Origin) only works from the client's listed websites (`POST /account/websites`, table `websites`); others get 403 `origin_not_allowed`, uncharged. Calls without Origin (curl, servers) are unaffected.
 - PAN and GSTIN are format/check-digit checks only, never "verified". IFSC data is the open Razorpay IFSC dataset (MIT): download `IFSC.csv` from https://github.com/razorpay/ifsc/releases and run `python -m app.cli load-ifsc IFSC.csv v2.0.62 2026-09-01` (tag and date of that release), about monthly.
 
 ### Wallet and pay-per-call

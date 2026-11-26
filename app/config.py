@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     # Hostnames the API answers on (comma-separated). Empty = any. In production it's only the
     # custom domain, so the host's default address (e.g. *.onrender.com) returns 404. /health always answers.
     allowed_hosts: str = ""
+    # This API's own address, for URLs it hands out (map images). Empty = https:// + the first allowed host.
+    api_url: str = ""
     cookie_secure: bool = False  # True in production (HTTPS only)
     session_days: int = 14
 
@@ -47,6 +49,12 @@ class Settings(BaseSettings):
     @property
     def hosts(self) -> list[str]:
         return [h.lower() for h in _csv(self.allowed_hosts)]
+
+    @property
+    def api_base(self) -> str:
+        if self.api_url:
+            return self.api_url.rstrip("/")
+        return f"https://{self.hosts[0]}" if self.hosts else "http://localhost:8000"
 
 
 @lru_cache
