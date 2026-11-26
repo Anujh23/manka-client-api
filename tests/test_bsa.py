@@ -137,3 +137,43 @@ def test_excel_download(site):
     assert site.post("/account/bsa/excel", json={"nope": 1}).status_code == 422
     with TestClient(app, headers={"Origin": ORIGIN["Origin"]}) as anon:
         assert anon.post("/account/bsa/excel", json=report).status_code == 401
+
+
+def test_load_limit_queue_and_busy(site, monkeypatch):
+    """Analyses past the parallel limit wait for a slot; when none frees up in time, or the queue is full, the caller
+    gets a free 429 busy with Retry-After, and the server keeps serving."""
+    import threading
+
+    recharge(5_000)
+    gate, started = threading.Event(), threading.Event()
+
+    def slow(path, **kw):
+        started.set()
+        gate.wait(10)
+        return {"meta": {}, "authenticity": {"verdict": "ORIGINAL"}}
+
+    monkeypatch.setattr(bsa_product, "analyze_isolated", slow)
+    monkeypatch.setattr(bsa_product, "_slots", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(bsa_product, "QUEUE_WAIT_S", 0.3)
+    results = {}
+    first = threading.Thread(target=lambda: results.update(first=v1_upload(site.key, statement_pdf())))
+    first.start()
+    assert started.wait(10)
+    before = balance(site)  # the running analysis is already charged
+
+    r = v1_upload(site.key, statement_pdf())  # no slot within 0.3 s
+    assert r.status_code == 429 and r.json()["error"]["code"] == "busy" and r.headers["retry-after"] == "30"
+    monkeypatch.setattr(bsa_product, "QUEUE_MAX", 0)
+    assert v1_upload(site.key, statement_pdf()).status_code == 429  # queue full: answered at once
+    assert balance(site) == before  # busy is never charged
+    assert site.get("/account").status_code == 200  # everything else still works meanwhile
+
+    monkeypatch.setattr(bsa_product, "QUEUE_MAX", 8)
+    monkeypatch.setattr(bsa_product, "QUEUE_WAIT_S", 10)
+    second = threading.Thread(target=lambda: results.update(second=v1_upload(site.key, statement_pdf())))
+    second.start()  # waits in the queue
+    gate.set()  # first finishes, second gets the slot
+    first.join()
+    second.join()
+    assert results["first"].status_code == 200 and results["second"].status_code == 200
+    assert balance(site) == before - 2_500

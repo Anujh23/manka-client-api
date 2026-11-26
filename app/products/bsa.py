@@ -6,15 +6,52 @@ a temp file for the length of the call and the report goes straight back to the 
 """
 import os
 import tempfile
+import threading
+from contextlib import contextmanager
 
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from ..bsa import AAStatement, PasswordRequired, UnsupportedFile
 from ..bsa.isolated import AnalysisTimeout, analyze_isolated
+from ..config import get_settings
 from . import Product, Rejected
 
 MAX_PDF_BYTES = 10 * 1024 * 1024
+
+# Load limit: at most MAX_PARALLEL analyses at once (memory), QUEUE_MAX more waiting up to QUEUE_WAIT_S for a slot.
+# The routes take a slot (api.run_bsa) before anything is charged, so Busy is always free.
+MAX_PARALLEL = get_settings().bsa_max_parallel
+QUEUE_MAX = get_settings().bsa_queue_max
+QUEUE_WAIT_S = get_settings().bsa_queue_wait
+_slots = threading.BoundedSemaphore(MAX_PARALLEL)
+_lock = threading.Lock()
+_waiting = 0
+
+
+class Busy(Exception):
+    """No analysis slot freed up in time, or the queue is full."""
+
+
+@contextmanager
+def slot():
+    global _waiting
+    if not _slots.acquire(blocking=False):
+        with _lock:
+            if _waiting >= QUEUE_MAX:
+                raise Busy
+            _waiting += 1
+        try:
+            got = _slots.acquire(timeout=QUEUE_WAIT_S)
+        finally:
+            with _lock:
+                _waiting -= 1
+        if not got:
+            raise Busy
+    try:
+        yield
+    finally:
+        _slots.release()
 
 
 class StatementIn(BaseModel):

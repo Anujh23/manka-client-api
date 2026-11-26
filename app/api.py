@@ -28,15 +28,17 @@ log = logging.getLogger(__name__)
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, code: str, message: str, call_id: int | None = None):
+    def __init__(self, status: int, code: str, message: str, call_id: int | None = None, retry_after: int | None = None):
         self.status, self.code, self.message, self.call_id = status, code, message, call_id
+        self.retry_after = retry_after
 
 
 def error_response(e: ApiError) -> JSONResponse:
     body: dict[str, Any] = {"error": {"code": e.code, "message": e.message}}
     if e.call_id:
         body["id"] = f"call_{e.call_id}"
-    return JSONResponse(body, status_code=e.status)
+    headers = {"Retry-After": str(e.retry_after)} if e.retry_after else None
+    return JSONResponse(body, status_code=e.status, headers=headers)
 
 
 def validation_message(e: ValidationError) -> str:
@@ -130,9 +132,20 @@ def statement_input(file: UploadFile | None, password: str | None) -> dict:
     return {"pdf": file.file.read(MAX_UPLOAD + 1), "password": password, "filename": file.filename}
 
 
+def run_bsa(db: Session, file: UploadFile | None, password: str | None, caller: Caller) -> dict:
+    """Both BSA routes: wait for an analysis slot (bsa.slot, before any charge), then the usual execute.
+    No slot in time / queue full -> free 429 busy with Retry-After."""
+    try:
+        with bsa.slot():
+            return execute(db, bsa.PRODUCT, statement_input(file, password), caller)
+    except bsa.Busy:
+        raise ApiError(429, "busy", "Too many statements are being analysed right now. Try again in a minute.",
+                       retry_after=30) from None
+
+
 @router.post(bsa.PRODUCT.path, name="bsa")
 def bsa_analyze(caller: KeyCaller, db: DB, file: Annotated[UploadFile | None, File()] = None, password: Annotated[str | None, Form()] = None):
-    return execute(db, bsa.PRODUCT, statement_input(file, password), caller)
+    return run_bsa(db, file, password, caller)
 
 
 for _p in PRODUCTS:

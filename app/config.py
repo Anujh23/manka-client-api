@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     allowed_hosts: str = ""
     # This API's own address, for URLs it hands out (map images). Empty = https:// + the first allowed host.
     api_url: str = ""
+    # BSA analyses running at once (each big statement needs ~100 MB; Render free has 512 MB), how many more may wait
+    # for a slot, and for how long; beyond that a call gets a free 429 busy. Raise them on a bigger server.
+    bsa_max_parallel: int = 2
+    bsa_queue_max: int = 8
+    bsa_queue_wait: float = 60.0
     cookie_secure: bool = False  # True in production (HTTPS only)
     session_days: int = 14
 

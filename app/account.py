@@ -96,7 +96,7 @@ def create_key(client: CurrentClient, db: DB) -> NewKeyOut:
 @router.post("/try/bsa")
 def try_bsa(client: CurrentClient, db: DB, file: Annotated[UploadFile | None, File()] = None, password: Annotated[str | None, Form()] = None) -> dict:
     """Bank statement analysis from the dashboard (multipart, like /v1/bsa/analyze)."""
-    return api.execute(db, bsa.PRODUCT, api.statement_input(file, password), api.Caller(client=client, key=None))
+    return api.run_bsa(db, file, password, api.Caller(client=client, key=None))
 
 
 @router.post("/bsa/excel")
