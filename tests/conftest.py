@@ -9,6 +9,7 @@ os.environ.update(
     ALLOWED_HOSTS="",
     BREVO_API_KEY="",
     SMTP_HOST="",
+    GEMINI_API_KEY="",  # tests never reach the network, whatever .env says
 )
 
 

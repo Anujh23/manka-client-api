@@ -98,6 +98,12 @@ def try_bsa(client: CurrentClient, db: DB, file: Annotated[UploadFile | None, Fi
     return api.run_bsa(db, file, password, api.Caller(client=client, key=None))
 
 
+@router.post("/try/payslip")
+def try_payslip(client: CurrentClient, db: DB, file: Annotated[UploadFile | None, File()] = None, password: Annotated[str | None, Form()] = None) -> dict:
+    """Payslip check from the dashboard (multipart, like /v1/payslip/check)."""
+    return api.run_payslip(db, file, password, api.Caller(client=client, key=None))
+
+
 @router.post("/bsa/excel")
 def bsa_excel(client: CurrentClient, report: Annotated[dict, Body()]) -> Response:
     """The BSA report the dashboard already has, as the same Excel workbook BSA exports. Free: nothing is stored, the

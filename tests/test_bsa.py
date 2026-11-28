@@ -153,8 +153,8 @@ def test_load_limit_queue_and_busy(site, monkeypatch):
         return {"meta": {}, "authenticity": {"verdict": "ORIGINAL"}}
 
     monkeypatch.setattr(bsa_product, "analyze_isolated", slow)
-    monkeypatch.setattr(bsa_product, "_slots", threading.BoundedSemaphore(1))
-    monkeypatch.setattr(bsa_product, "QUEUE_WAIT_S", 0.3)
+    monkeypatch.setattr(bsa_product.LIMIT, "_slots", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(bsa_product.LIMIT, "wait_s", 0.3)
     results = {}
     first = threading.Thread(target=lambda: results.update(first=v1_upload(site.key, statement_pdf())))
     first.start()
@@ -163,13 +163,13 @@ def test_load_limit_queue_and_busy(site, monkeypatch):
 
     r = v1_upload(site.key, statement_pdf())  # no slot within 0.3 s
     assert r.status_code == 429 and r.json()["error"]["code"] == "busy" and r.headers["retry-after"] == "30"
-    monkeypatch.setattr(bsa_product, "QUEUE_MAX", 0)
+    monkeypatch.setattr(bsa_product.LIMIT, "queue_max", 0)
     assert v1_upload(site.key, statement_pdf()).status_code == 429  # queue full: answered at once
     assert balance(site) == before  # busy is never charged
     assert site.get("/account").status_code == 200  # everything else still works meanwhile
 
-    monkeypatch.setattr(bsa_product, "QUEUE_MAX", 8)
-    monkeypatch.setattr(bsa_product, "QUEUE_WAIT_S", 10)
+    monkeypatch.setattr(bsa_product.LIMIT, "queue_max", 8)
+    monkeypatch.setattr(bsa_product.LIMIT, "wait_s", 10)
     second = threading.Thread(target=lambda: results.update(second=v1_upload(site.key, statement_pdf())))
     second.start()  # waits in the queue
     gate.set()  # first finishes, second gets the slot

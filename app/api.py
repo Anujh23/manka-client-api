@@ -20,7 +20,8 @@ from . import staticmap, wallet
 from .bsa.export import report_to_xlsx
 from .db import DB, utcnow
 from .models import ApiCall, ApiKey, Client, LocationRequest, Website
-from .products import PRODUCTS, NotFound, Product, Rejected, bsa, maps
+from .limits import Busy
+from .products import PRODUCTS, NotFound, Product, Rejected, bsa, maps, payslip
 from .security import token_hash
 
 MAX_UPLOAD = bsa.MAX_PDF_BYTES
@@ -128,7 +129,8 @@ def endpoint(product: Product):
 
 
 def statement_input(file: UploadFile | None, password: str | None) -> dict:
-    """BSA takes a multipart upload (field `file`, optional `password`), so it has its own routes (here and in account.py)."""
+    """BSA and Payslip Checker take a multipart upload (field `file`, optional `password`), so they have their own routes
+    (here and in account.py)."""
     if file is None:
         raise ApiError(422, "invalid_request", "file: Upload a PDF.")
     return {"pdf": file.file.read(MAX_UPLOAD + 1), "password": password, "filename": file.filename}
@@ -140,8 +142,18 @@ def run_bsa(db: Session, file: UploadFile | None, password: str | None, caller: 
     try:
         with bsa.slot():
             return execute(db, bsa.PRODUCT, statement_input(file, password), caller)
-    except bsa.Busy:
+    except Busy:
         raise ApiError(429, "busy", "Too many statements are being analysed right now. Try again in a minute.",
+                       retry_after=30) from None
+
+
+def run_payslip(db: Session, file: UploadFile | None, password: str | None, caller: Caller) -> dict:
+    """Both payslip routes: same as run_bsa with the payslip load limit."""
+    try:
+        with payslip.slot():
+            return execute(db, payslip.PRODUCT, statement_input(file, password), caller)
+    except Busy:
+        raise ApiError(429, "busy", "Too many payslips are being checked right now. Try again in a minute.",
                        retry_after=30) from None
 
 
@@ -163,9 +175,15 @@ def bsa_analyze(caller: KeyCaller, db: DB, file: Annotated[UploadFile | None, Fi
     return xlsx_response(report) if fmt == "xlsx" else report
 
 
+@router.post(payslip.PRODUCT.path, name="payslip")
+def payslip_check(caller: KeyCaller, db: DB, file: Annotated[UploadFile | None, File()] = None,
+                  password: Annotated[str | None, Form()] = None):
+    return run_payslip(db, file, password, caller)
+
+
 for _p in PRODUCTS:
-    if _p is bsa.PRODUCT:
-        continue  # multipart route above
+    if _p in (bsa.PRODUCT, payslip.PRODUCT):
+        continue  # multipart routes above
     router.add_api_route(_p.path, endpoint(_p), methods=[_p.method], name=_p.name)
 
 

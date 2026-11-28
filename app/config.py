@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     bsa_max_parallel: int = 2
     bsa_queue_max: int = 8
     bsa_queue_wait: float = 60.0
+    # Payslip checks running at once (light: text + a few API calls), queue and wait, like BSA's above.
+    payslip_max_parallel: int = 4
+    payslip_queue_max: int = 8
+    payslip_queue_wait: float = 60.0
+    # Payslip Checker's AI step (app/payslip/). Without a key the verdict comes from file and rule checks only.
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_fallback_model: str = "gemini-3.5-flash-lite"
+    gemini_send_pdf: bool = False  # send the whole PDF (only on a paid tier); default sends redacted salary lines
+    gemini_deadline_s: float = 45  # per model attempt, then fall back
     cookie_secure: bool = False  # True in production (HTTPS only)
     session_days: int = 14
 

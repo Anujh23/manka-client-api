@@ -36,8 +36,8 @@ class Product:
     run: Callable[[Session, Any, Any], dict]  # (db, validated input, calling Client)
 
 
-from . import bsa, gstin, ifsc, maps, pan  # noqa: E402  (they import Product from here)
+from . import bsa, gstin, ifsc, maps, pan, payslip  # noqa: E402  (they import Product from here)
 
-PRODUCTS: list[Product] = [pan.PRODUCT, gstin.PRODUCT, ifsc.PRODUCT, maps.PRODUCT, maps.LOCATE, bsa.PRODUCT]
+PRODUCTS: list[Product] = [pan.PRODUCT, gstin.PRODUCT, ifsc.PRODUCT, maps.PRODUCT, maps.LOCATE, bsa.PRODUCT, payslip.PRODUCT]
 BY_NAME = {p.name: p for p in PRODUCTS}
 PRICES = {p.name: p.price_paise for p in PRODUCTS}
